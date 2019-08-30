@@ -5,36 +5,24 @@
  * @Author  : 9rax.dev@gmail.com
  * @DateTime: 2019/3/3 2:00
  */
-
 namespace linge;
-
 
 class MysqlStructSync
 {
-
     /**
      * Execute sql status statistics
      *
      * @var array
      */
     private $execute_sql_stat = array();
-
     private $diff_sql = array();
-
     private $self_database_struct;
-
     private $refer_database_struct;
-
     private $self_connection;
-
     private $self_db;
-
     private $refer_connection;
-
     private $refer_db;
-
     private $remove_auto_increment = false;
-
     /**
      * @Author  : 9rax.dev@gmail.com
      * @DateTime: 2019/8/30 19:31
@@ -51,20 +39,17 @@ class MysqlStructSync
     /**
      * MysqlStructSync constructor.
      *
-     * @param $old_database_config
-     * @param $new_database_config
+     * @param $old_db_conf
+     * @param $develop_db_conf
      */
-    public function __construct($old_database_config, $new_database_config)
+    public function __construct($old_db_conf, $develop_db_conf)
     {
 
-        $this->self_connection = new \Mysqli(
-            $old_database_config['host'],
-            $old_database_config['username'],
-            $old_database_config['passwd'],
-            $old_database_config['dbname'],
-            isset($old_database_config['port'])?$old_database_config['port']:3306
-        );
+        @$this->self_connection = new \Mysqli($old_db_conf['host'],$old_db_conf['username'],$old_db_conf['passwd'],$old_db_conf['dbname'],isset($old_db_conf['port'])?$old_db_conf['port']:3306);
 
+        if($this->self_connection -> connect_errno){
+            die("Database connection failed:".$this->self_connection -> connect_error);
+        }
 
         if (isset($_POST['MysqlStructSync']) && $_POST['MysqlStructSync']) {
             $this->diff_sql = $_POST['MysqlStructSync'];
@@ -72,19 +57,15 @@ class MysqlStructSync
             die;
         }
 
-        $this->refer_connection = new \Mysqli($new_database_config['host'],
-            $new_database_config['username'],
-            $new_database_config['passwd'],
-            $new_database_config['dbname'],
-        isset($new_database_config['port'])?$new_database_config['port']:3306
-        );
+        @$this->refer_connection = new \Mysqli($develop_db_conf['host'],$develop_db_conf['username'],$develop_db_conf['passwd'],$develop_db_conf['dbname'],isset($develop_db_conf['port'])?$develop_db_conf['port']:3306);
 
+        if($this->refer_connection -> connect_errno){
+            die("Database connection failed:".$this->refer_connection -> connect_error);
+        }
 
-        $this->self_db = $old_database_config['dbname'];
-        $this->refer_db = $new_database_config['dbname'];
-
+        $this->self_db = $old_db_conf['dbname'];
+        $this->refer_db = $develop_db_conf['dbname'];
     }
-
 
     /**
      * remove_auto_increment
@@ -97,10 +78,7 @@ class MysqlStructSync
         $this->remove_auto_increment = true;
     }
 
-
-
-
-    /**
+        /**
      * Compare database structure
      *
      * @Author  : 9rax.dev@gmail.com
@@ -108,17 +86,13 @@ class MysqlStructSync
      */
     function baseDiff()
     {
-
         $this->self_database_struct = $this->getStructure($this->self_connection);
         $this->refer_database_struct = $this->getStructure($this->refer_connection);
-
         $res['ADD_TABLE'] = array_diff($this->refer_database_struct['tables'], $this->self_database_struct['tables']);
         $res['DROP_TABLE'] = array_diff($this->self_database_struct['tables'], $this->refer_database_struct['tables']);
-
         //array_intersect_assoc will report notice error
         $develop_columns = self::_array_intersect_assoc($this->refer_database_struct['columns'], $this->self_database_struct['columns']);
         $self_columns =  self::_array_intersect_assoc($this->self_database_struct['columns'], $this->refer_database_struct['columns']);
-
 
         if ($develop_columns) {
             foreach ($develop_columns as $table => $columns) {
@@ -136,18 +110,13 @@ class MysqlStructSync
                 }
             }
         }
-
         $res['DROP_FIELD'] = array_filter($self_columns);
-
         $res['DROP_CONSTRAINT'] = self::array_diff_assoc_recursive($this->self_database_struct['constraints'], $this->refer_database_struct['constraints'], $res['DROP_TABLE']);
         $res['ADD_CONSTRAINT'] = self::array_diff_assoc_recursive($this->refer_database_struct['constraints'], $this->self_database_struct['constraints'], $res['ADD_TABLE']);
-
         foreach (array_filter($res) as $type => $data) {
             $this->getExecuteSql($data, $type);
         }
-
     }
-
     /**
      * array_intersect_assoc
      * @return mixed
@@ -155,23 +124,18 @@ class MysqlStructSync
      * @DateTime: 2019/8/30 19:27
      */
     static function _array_intersect_assoc() {
-
         $args = func_get_args();
         $res = $args[0];
-
         for ($i=1;$i<count($args);$i++) {
             if (!is_array($args[$i])) {continue;}
-
             foreach ($res as $key => $data) {
                 if ( (!array_key_exists($key, $args[$i])) || ( (isset($args[$i][$key])) && ($args[$i][$key] !== $res[$key]) ) ) {
                     unset($res[$key]);
                 }
             }
         }
-
         return $res;
     }
-
 
     /**
      * advanceDiff
@@ -200,13 +164,10 @@ class MysqlStructSync
                 $diff['DROP_' . $type] = self::array_diff_assoc_recursive(isset($arr[$type]['self'])?$arr[$type]['self']:[], isset($arr[$type]['refer'])?$arr[$type]['refer']:[]);
             }
         }
-
         foreach (array_filter($diff) as $type => $data) {
             $this->getExecuteSql($data, $type);
         }
-
     }
-
     /**
      * getResult
      *
@@ -218,7 +179,6 @@ class MysqlStructSync
     {
         return $this->diff_sql;
     }
-
     /**
      * getExecuteSql
      *
@@ -230,25 +190,18 @@ class MysqlStructSync
      */
     function getExecuteSql($arr, $type)
     {
-
         foreach ($arr as $table => $rows) {
             $sql = '';
-
             if (in_array($type, ['ADD_TABLE', 'DROP_TABLE'])) {
                 $sql = $type == 'ADD_TABLE' ? $this->refer_database_struct['show_create'][$rows] : "DROP TABLE IF EXISTS {$rows}";
                 $this->diff_sql[$type][] = rtrim($sql, ',');
                 continue;
             }
-
             if (in_array($type, ['ADD_VIEW', 'DROP_VIEW', 'ADD_TRIGGER', 'DROP_TRIGGER', 'ADD_EVENT', 'DROP_EVENT', 'ADD_FUNCTION', 'DROP_FUNCTION', 'ADD_PROCEDURE', 'DROP_PROCEDURE'])) {
-
                 $sql = strpos($type, 'ADD') !== false ? $rows : str_replace('_', '', $rows) . ' ' . $table;
-
                 $this->diff_sql[$type][] = $sql;
-
                 continue;
             }
-
             foreach ($rows as $key => $val) {
                 switch ($type) {
                     case 'MODIFY_FIELD':
@@ -267,12 +220,10 @@ class MysqlStructSync
                         $sql = self::getConstraintQuery($val, $table)['drop'];
                         break;
                 }
-
                 $this->diff_sql[$type][] = rtrim($sql, ',');
             }
         }
     }
-
 
     /**
      * @var array $patterns
@@ -283,7 +234,6 @@ class MysqlStructSync
         'key' => '(^[^`]\s*KEY\s+(`.*`) .*[,]?$)',
         'constraint' => '(^[^`]\s*CONSTRAINT\s+(`.*`) .*[,]?$)',
     ];
-
 
     /**
      * getConstraintQuery
@@ -312,7 +262,6 @@ class MysqlStructSync
         }
     }
 
-
     /**
      * array_diff_assoc_recursive
      *
@@ -327,7 +276,6 @@ class MysqlStructSync
     static function array_diff_assoc_recursive($array1, $array2, $exclude = [])
     {
         $ret = array();
-
         if($array1){
             foreach ($array1 as $k => $v) {
                 if ($exclude && in_array($k, $exclude)) {
@@ -339,13 +287,10 @@ class MysqlStructSync
                 else {
                     unset($array1[$k]);
                 }
-
             }
         }
-
         return array_filter($ret);
     }
-
     /**
      * Manually call the execute sql   for manuallySelectUpdates
      *
@@ -355,20 +300,14 @@ class MysqlStructSync
      */
     function execute()
     {
-
         $this->execute_sql_stat = array();
-
         $diff_sqls = array_filter($this->diff_sql);
-
         if ($diff_sqls) {
-
             $add_tables=isset($diff_sqls['ADD_TABLE'])?$diff_sqls['ADD_TABLE']:null;
-
             if($add_tables){
                 unset($diff_sqls['ADD_TABLE']);
                 $this->executeAddTables($add_tables);
             }
-
             foreach ($diff_sqls as $type => $sqls) {
                 foreach ($sqls as $sql) {
                     if ($this->self_connection->query($sql)) {
@@ -379,10 +318,8 @@ class MysqlStructSync
                 }
             }
         }
-
         return $this->execute_sql_stat;
     }
-
 
     /**
      * executeAddTables
@@ -392,9 +329,7 @@ class MysqlStructSync
      * @DateTime: 2019/6/12 23:38
      */
     private function executeAddTables($add_tables_sqls){
-
         $this->self_connection->query('SET FOREIGN_KEY_CHECKS=0');
-
         foreach ($add_tables_sqls as $key=>$sql){
             if ($this->self_connection->query($sql)) {
                 $this->execute_sql_stat['success']['ADD_TABLE'][] = $sql;
@@ -403,10 +338,8 @@ class MysqlStructSync
                 $this->execute_sql_stat['error']['ADD_TABLE'][] = $sql;
             }
         }
-
         $this->self_connection->query('SET FOREIGN_KEY_CHECKS=1');
     }
-
 
     /**
      * Manually select the updated sql
@@ -416,30 +349,19 @@ class MysqlStructSync
      */
     function manuallySelectUpdates()
     {
-
         if ($this->diff_sql) {
-
             $form = '<form action="" method="post" style="font-size: 12px;padding: 0 50px;">';
-
             foreach ($this->diff_sql as $type => $sqls) {
-
                 $form .= '<h2>' . $type . '</h2>';
-
                 foreach ($sqls as $sql) {
-
                     $form .= '<div style="height: auto;overflow-y: hidden;"><input type="checkbox" name="MysqlStructSync[' . $type . '][]" value="' . $sql . '" style="float: left;position: absolute;margin-left: -15px;margin-top: 20px;"><pre style="float: left;"><code class="language-sql line-numbers">' . $sql . '</code></pre></div>';
                 }
-
             }
-
             $form .= '<input type="submit"></form>';
-
             $form .= '<link rel="stylesheet" href="https://cdn.staticfile.org/prism/9000.0.1/themes/prism.min.css"><script src="https://cdn.staticfile.org/prism/9000.0.1/prism.min.js"></script><script src="https://cdn.staticfile.org/prism/9000.0.1/components/prism-sql.min.js"></script>';
-
             die($form);
         }
     }
-
 
     /**
      * getStructure
@@ -453,45 +375,34 @@ class MysqlStructSync
     private function getStructure($resource)
     {
         $stmt1 = $resource->query("SHOW TABLE STATUS WHERE Comment!='VIEW'");
-
         $alert_columns = [];
         $constraints = [];
         $show_create = [];
         $tables = [];
-
         $pattern = '/' . implode('|', self::$patterns) . '/m';
-
         foreach ($stmt1->fetch_all(MYSQLI_ASSOC) as $row) {
-
             //获取建表语句
             $alert_columns_conn = $resource->query('SHOW CREATE TABLE ' . $row['Name']);
             $sql = $alert_columns_conn->fetch_assoc();
-
             preg_match_all('/^\s+[`]([^`]*)`.*?$/m', $sql['Create Table'], $key_value);
             $alert_columns[$row['Name']] = array_combine($key_value[1], array_map(function ($item) {
                 return trim(rtrim($item, ','));
             }, $key_value[0]));
-
             //获取主键索引
             preg_match_all($pattern, $sql['Create Table'], $matches);
             $consrt = array_map(function ($item) {
                 return trim(rtrim($item, ','));
             }, $matches[0]);
-
             $constraints[$row['Name']] = $consrt;
-
             $show_create[$row['Name']] = $this->remove_auto_increment?preg_replace('/AUTO_INCREMENT=[^\s]*/','',$sql['Create Table']):$sql['Create Table'];
-
             $tables[] = $row['Name'];
         }
-
         ksort($alert_columns);
         ksort($constraints);
         ksort($show_create);
         ksort($tables);
         return ['tables' => $tables, 'columns' => $alert_columns, 'show_create' => $show_create, 'constraints' => $constraints];
     }
-
 
     /**
      * dump
@@ -505,5 +416,4 @@ class MysqlStructSync
     {
         echo '<pre>' . print_r($arr, true) . '</pre>';
     }
-
 }
