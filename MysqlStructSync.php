@@ -35,8 +35,11 @@ class MysqlStructSync
 
     private $remove_auto_increment = false;
 
-
-
+    /**
+     * @Author  : 9rax.dev@gmail.com
+     * @DateTime: 2019/8/30 19:31
+     * @var array
+     */
     static $advance = [
         'VIEW' => ["SELECT TABLE_NAME as Name FROM information_schema.VIEWS WHERE TABLE_SCHEMA='#'", 'Create View'],
         'TRIGGER' => ["SELECT TRIGGER_NAME as Name FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='#'", 'SQL Original Statement'],
@@ -54,11 +57,12 @@ class MysqlStructSync
     public function __construct($old_database_config, $new_database_config)
     {
 
-        $this->self_connection = new \Mysqli($old_database_config['host'],
+        $this->self_connection = new \Mysqli(
+            $old_database_config['host'],
             $old_database_config['username'],
             $old_database_config['passwd'],
             $old_database_config['dbname'],
-            $old_database_config['port']
+            isset($old_database_config['port'])?$old_database_config['port']:3306
         );
 
 
@@ -72,7 +76,7 @@ class MysqlStructSync
             $new_database_config['username'],
             $new_database_config['passwd'],
             $new_database_config['dbname'],
-            $new_database_config['port']
+        isset($new_database_config['port'])?$new_database_config['port']:3306
         );
 
 
@@ -108,13 +112,12 @@ class MysqlStructSync
         $this->self_database_struct = $this->getStructure($this->self_connection);
         $this->refer_database_struct = $this->getStructure($this->refer_connection);
 
-
         $res['ADD_TABLE'] = array_diff($this->refer_database_struct['tables'], $this->self_database_struct['tables']);
         $res['DROP_TABLE'] = array_diff($this->self_database_struct['tables'], $this->refer_database_struct['tables']);
 
-
-        $develop_columns = array_intersect_assoc($this->refer_database_struct['columns'], $this->self_database_struct['columns']);
-        $self_columns = array_intersect_assoc($this->self_database_struct['columns'], $this->refer_database_struct['columns']);
+        //array_intersect_assoc will report notice error
+        $develop_columns = self::_array_intersect_assoc($this->refer_database_struct['columns'], $this->self_database_struct['columns']);
+        $self_columns =  self::_array_intersect_assoc($this->self_database_struct['columns'], $this->refer_database_struct['columns']);
 
 
         if ($develop_columns) {
@@ -145,6 +148,30 @@ class MysqlStructSync
 
     }
 
+    /**
+     * array_intersect_assoc
+     * @return mixed
+     * @Author  : 9rax.dev@gmail.com
+     * @DateTime: 2019/8/30 19:27
+     */
+    static function _array_intersect_assoc() {
+
+        $args = func_get_args();
+        $res = $args[0];
+
+        for ($i=1;$i<count($args);$i++) {
+            if (!is_array($args[$i])) {continue;}
+
+            foreach ($res as $key => $data) {
+                if ( (!array_key_exists($key, $args[$i])) || ( (isset($args[$i][$key])) && ($args[$i][$key] !== $res[$key]) ) ) {
+                    unset($res[$key]);
+                }
+            }
+        }
+
+        return $res;
+    }
+
 
     /**
      * advanceDiff
@@ -163,15 +190,14 @@ class MysqlStructSync
                 $sql = str_replace('#', $this->$db, $list_sql[0]);
                 $connect = $this->$conn->query($sql);
                 $res = $connect->fetch_all(MYSQLI_ASSOC);
-
-                foreach ($res as $row) {
-                    $show_create_conn = $this->$conn->query('SHOW CREATE ' . $type . ' ' . $row['Name']);
-                    //p($show_create_conn->fetch_assoc());
-                    $arr[$type][$who][$row['Name']] = preg_replace('/DEFINER=[^\s]*/', '', $show_create_conn->fetch_assoc()[$list_sql[1]]);
+                if($res){
+                    foreach ($res as $row) {
+                        $show_create_conn = $this->$conn->query('SHOW CREATE ' . $type . ' ' . $row['Name']);
+                        $arr[$type][$who][$row['Name']] = preg_replace('/DEFINER=[^\s]*/', '', $show_create_conn->fetch_assoc()[$list_sql[1]]);
+                    }
                 }
-
-                $diff['ADD_' . $type] = self::array_diff_assoc_recursive($arr[$type]['refer'], $arr[$type]['self']);
-                $diff['DROP_' . $type] = self::array_diff_assoc_recursive($arr[$type]['self'], $arr[$type]['refer']);
+                $diff['ADD_' . $type] = self::array_diff_assoc_recursive(isset($arr[$type]['refer'])?$arr[$type]['refer']:[], isset($arr[$type]['self'])?$arr[$type]['self']:[]);
+                $diff['DROP_' . $type] = self::array_diff_assoc_recursive(isset($arr[$type]['self'])?$arr[$type]['self']:[], isset($arr[$type]['refer'])?$arr[$type]['refer']:[]);
             }
         }
 
@@ -192,7 +218,6 @@ class MysqlStructSync
     {
         return $this->diff_sql;
     }
-
 
     /**
      * getExecuteSql
@@ -215,7 +240,6 @@ class MysqlStructSync
                 continue;
             }
 
-
             if (in_array($type, ['ADD_VIEW', 'DROP_VIEW', 'ADD_TRIGGER', 'DROP_TRIGGER', 'ADD_EVENT', 'DROP_EVENT', 'ADD_FUNCTION', 'DROP_FUNCTION', 'ADD_PROCEDURE', 'DROP_PROCEDURE'])) {
 
                 $sql = strpos($type, 'ADD') !== false ? $rows : str_replace('_', '', $rows) . ' ' . $table;
@@ -224,7 +248,6 @@ class MysqlStructSync
 
                 continue;
             }
-
 
             foreach ($rows as $key => $val) {
                 switch ($type) {
@@ -305,21 +328,21 @@ class MysqlStructSync
     {
         $ret = array();
 
+        if($array1){
+            foreach ($array1 as $k => $v) {
+                if ($exclude && in_array($k, $exclude)) {
+                    continue;
+                }
+                if (!isset($array2[$k])) $ret[$k] = $v;
+                else if (is_array($v) && is_array($array2[$k])) $ret[$k] = self::array_diff_assoc_recursive($v, $array2[$k]);
+                else if ($v != $array2[$k]) $ret[$k] = $v;
+                else {
+                    unset($array1[$k]);
+                }
 
-        foreach ($array1 as $k => $v) {
-
-            if ($exclude && in_array($k, $exclude)) {
-                continue;
             }
-
-            if (!isset($array2[$k])) $ret[$k] = $v;
-            else if (is_array($v) && is_array($array2[$k])) $ret[$k] = self::array_diff_assoc_recursive($v, $array2[$k]);
-            else if ($v != $array2[$k]) $ret[$k] = $v;
-            else {
-                unset($array1[$k]);
-            }
-
         }
+
         return array_filter($ret);
     }
 
@@ -338,7 +361,6 @@ class MysqlStructSync
         $diff_sqls = array_filter($this->diff_sql);
 
         if ($diff_sqls) {
-
 
             $add_tables=isset($diff_sqls['ADD_TABLE'])?$diff_sqls['ADD_TABLE']:null;
 
@@ -422,7 +444,7 @@ class MysqlStructSync
     /**
      * getStructure
      *
-     * @param $resource
+     * @param \Mysqli $resource
      *
      * @return array
      * @Author  : 9rax.dev@gmail.com
@@ -458,11 +480,9 @@ class MysqlStructSync
 
             $constraints[$row['Name']] = $consrt;
 
-
             $show_create[$row['Name']] = $this->remove_auto_increment?preg_replace('/AUTO_INCREMENT=[^\s]*/','',$sql['Create Table']):$sql['Create Table'];
 
             $tables[] = $row['Name'];
-
         }
 
         ksort($alert_columns);
