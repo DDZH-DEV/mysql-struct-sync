@@ -17,7 +17,7 @@ Can be used to synchronize database structures, compare differences(table,column
 
 to install this library using composer:
 ```sh
-composer require 9raxdev/mysql-struct-sync
+composer require ddzh-dev/mysql-struct-sync
 ```
 
 ### New Features in V2
@@ -45,7 +45,7 @@ $source_db_config=['host'=>'127.0.0.1','username'=>'root','passwd'=>'root','dbna
 $target_db_config=['host'=>'127.0.0.1','username'=>'root','passwd'=>'root','dbname'=>'test_new','port'=>3306];
 
 // Compare source_db_config against target_db_config
-$compare=new \linge\MysqlStructSync($source_db_config, $target_db_config);
+$compare=new \DDZH\MysqlStructSync($source_db_config, $target_db_config);
 
 $compare->removeAutoIncrement();
 
@@ -68,14 +68,14 @@ $production_db_config = ['host'=>'...'];
 $development_db_config = ['host'=>'...'];
 
 // Step 1: In your development/build process, create a structure snapshot from the target schema.
-$target_structure_snapshot = \linge\MysqlStructSync::fetchStructureArray($development_db_config);
+$target_structure_snapshot = \DDZH\MysqlStructSync::fetchStructureArray($development_db_config);
 // Serialize and store this snapshot string (e.g., in your versions table in the database).
 $snapshot_string = json_encode($target_structure_snapshot);
 
 
 // Step 2: In your deployment/migration process, compare the live database against the loaded snapshot.
 $loaded_snapshot = json_decode($snapshot_string, true);
-$compare = new \linge\MysqlStructSync($production_db_config, $loaded_snapshot);
+$compare = new \DDZH\MysqlStructSync($production_db_config, $loaded_snapshot);
 
 $compare->removeAutoIncrement();
 $compare->baseDiff();

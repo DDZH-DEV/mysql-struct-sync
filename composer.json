@@ -1,10 +1,10 @@
 {
-    "name": "9raxdev/mysql-struct-sync",
+    "name": "ddzh-dev/mysql-struct-sync",
     "description": "可用于帮助开发人员比较两个数据库之间的差异(表,列,约束,事件,函数,存储过程,触发器,视图),并生成更新语句。Can be used to synchronize database structures, compare differences(table,column,constraints,events,functions,procedures,triggers,views) between databases and generating queries.",
     "type": "library",
     "authors": [
         {
-            "name": "linge",
+            "name": "DDZH-DEV",
             "email": "9rax.dev@gmail.com"
         }
     ],
@@ -14,8 +14,8 @@
         "ext-mysqli": "*"
     },
     "autoload": {
-        "files":  [
-            "MysqlStructSync.php"
-        ]
+        "psr-4": {
+            "DDZH\\": ""
+        }
     }
 }

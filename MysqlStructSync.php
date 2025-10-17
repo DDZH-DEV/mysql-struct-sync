@@ -5,7 +5,7 @@
  * @Author  : 9rax.dev@gmail.com
  * @DateTime: 2019/3/3 2:00
  */
-namespace linge;
+namespace DDZH;
 
 class MysqlStructSync
 {
