@@ -39,16 +39,29 @@ class MysqlStructSync
     /**
      * MysqlStructSync constructor.
      *
-     * @param $old_db_conf
-     * @param $develop_db_conf
+     * @param array $self_db_conf
+     * @param array $refer_config Can be a DB config array or a pre-fetched structure array
      */
-    public function __construct($old_db_conf, $develop_db_conf)
+    public function __construct(array $self_db_conf, array $refer_config)
     {
+        @$this->self_connection = new \Mysqli($self_db_conf['host'], $self_db_conf['username'], $self_db_conf['passwd'], $self_db_conf['dbname'], isset($self_db_conf['port']) ? $self_db_conf['port'] : 3306);
 
-        @$this->self_connection = new \Mysqli($old_db_conf['host'],$old_db_conf['username'],$old_db_conf['passwd'],$old_db_conf['dbname'],isset($old_db_conf['port'])?$old_db_conf['port']:3306);
+        if ($this->self_connection->connect_errno) {
+            die("Database connection failed:" . $this->self_connection->connect_error);
+        }
+        $this->self_db = $self_db_conf['dbname'];
 
-        if($this->self_connection -> connect_errno){
-            die("Database connection failed:".$this->self_connection -> connect_error);
+        // (新逻辑) 判断 refer_config 是连接还是结构
+        if (isset($refer_config['host'])) { // It's a connection config
+            @$this->refer_connection = new \Mysqli($refer_config['host'], $refer_config['username'], $refer_config['passwd'], $refer_config['dbname'], isset($refer_config['port']) ? $refer_config['port'] : 3306);
+
+            if ($this->refer_connection->connect_errno) {
+                die("Database connection failed:" . $this->refer_connection->connect_error);
+            }
+            $this->refer_db = $refer_config['dbname'];
+        } else { // It's a structure array
+            $this->refer_database_struct = $refer_config;
+            $this->refer_db = 'pre-fetched structure'; // Set a placeholder name
         }
 
         if (isset($_POST['MysqlStructSync']) && $_POST['MysqlStructSync']) {
@@ -56,15 +69,19 @@ class MysqlStructSync
             $this->dump($this->execute());
             die;
         }
+    }
 
-        @$this->refer_connection = new \Mysqli($develop_db_conf['host'],$develop_db_conf['username'],$develop_db_conf['passwd'],$develop_db_conf['dbname'],isset($develop_db_conf['port'])?$develop_db_conf['port']:3306);
-
-        if($this->refer_connection -> connect_errno){
-            die("Database connection failed:".$this->refer_connection -> connect_error);
-        }
-
-        $this->self_db = $old_db_conf['dbname'];
-        $this->refer_db = $develop_db_conf['dbname'];
+    /**
+     * (新增) 静态方法，用于获取单个数据库的结构数组
+     *
+     * @param array $db_conf
+     * @return array
+     */
+    public static function fetchStructureArray(array $db_conf)
+    {
+        $instance = new self($db_conf, []); // The second param is a dummy empty structure
+        $instance->refer_connection = null; // Prevent any accidental usage
+        return $instance->getStructure($instance->self_connection);
     }
 
     /**
@@ -78,7 +95,7 @@ class MysqlStructSync
         $this->remove_auto_increment = true;
     }
 
-        /**
+    /**
      * Compare database structure
      *
      * @Author  : 9rax.dev@gmail.com
@@ -87,32 +104,51 @@ class MysqlStructSync
     function baseDiff()
     {
         $this->self_database_struct = $this->getStructure($this->self_connection);
-        $this->refer_database_struct = $this->getStructure($this->refer_connection);
-        $res['ADD_TABLE'] = array_diff($this->refer_database_struct['tables'], $this->self_database_struct['tables']);
-        $res['DROP_TABLE'] = array_diff($this->self_database_struct['tables'], $this->refer_database_struct['tables']);
-        //array_intersect_assoc will report notice error
-        $develop_columns = self::_array_intersect_assoc($this->refer_database_struct['columns'], $this->self_database_struct['columns']);
-        $self_columns =  self::_array_intersect_assoc($this->self_database_struct['columns'], $this->refer_database_struct['columns']);
+        // (新逻辑) 如果目标结构已预加载，则跳过数据库查询
+        if (!$this->refer_database_struct) {
+            $this->refer_database_struct = $this->getStructure($this->refer_connection);
+        }
 
-        if ($develop_columns) {
-            foreach ($develop_columns as $table => $columns) {
-                foreach ($columns as $field => $sql) {
-                    //add
-                    if (!isset($self_columns[$table][$field])) {
-                        $res['ADD_FIELD'][$table][$field] = $sql;
-                        //modify
-                    } elseif ($self_columns[$table][$field] !== $sql) {
-                        $res['MODIFY_FIELD'][$table][$field] = $sql;
-                        unset($self_columns[$table][$field]);
-                    } else {
-                        unset($self_columns[$table][$field]);
-                    }
+        $res = [];
+        $res['ADD_TABLE'] = array_diff($this->refer_database_struct['tables'] ?? [], $this->self_database_struct['tables'] ?? []);
+        $res['DROP_TABLE'] = array_diff($this->self_database_struct['tables'] ?? [], $this->refer_database_struct['tables'] ?? []);
+
+        $self_cols = $this->self_database_struct['columns'];
+        $refer_cols = $this->refer_database_struct['columns'];
+
+        // (新逻辑-修复) 查找要检查列差异的公共表
+        $common_tables = array_intersect(
+            $this->self_database_struct['tables'] ?? [],
+            $this->refer_database_struct['tables'] ?? []
+        );
+
+        foreach ($common_tables as $table) {
+            $self_table_cols = $self_cols[$table] ?? [];
+            $refer_table_cols = $refer_cols[$table] ?? [];
+
+            // 通过遍历目标结构来查找新增和修改的列
+            foreach ($refer_table_cols as $field => $def) {
+                if (!isset($self_table_cols[$field])) {
+                    // 列存在于目标但不存在于源 -> ADD
+                    $res['ADD_FIELD'][$table][$field] = $def;
+                } elseif ($self_table_cols[$field] !== $def) {
+                    // 列存在于两者中，但定义不同 -> MODIFY
+                    $res['MODIFY_FIELD'][$table][$field] = $def;
+                }
+            }
+
+            // 通过遍历源结构来查找删除的列
+            foreach ($self_table_cols as $field => $def) {
+                if (!isset($refer_table_cols[$field])) {
+                    // 列存在于源但不存在于目标 -> DROP
+                    $res['DROP_FIELD'][$table][$field] = $def;
                 }
             }
         }
-        $res['DROP_FIELD'] = array_filter($self_columns);
+
         $res['DROP_CONSTRAINT'] = self::array_diff_assoc_recursive($this->self_database_struct['constraints'], $this->refer_database_struct['constraints'], $res['DROP_TABLE']);
         $res['ADD_CONSTRAINT'] = self::array_diff_assoc_recursive($this->refer_database_struct['constraints'], $this->self_database_struct['constraints'], $res['ADD_TABLE']);
+
         foreach (array_filter($res) as $type => $data) {
             $this->getExecuteSql($data, $type);
         }
@@ -149,6 +185,12 @@ class MysqlStructSync
         $diff = [];
         foreach (self::$advance as $type => $list_sql) {
             foreach (['self', 'refer'] as $who) {
+                // (新逻辑) 如果是预加载的结构，则跳过 refer 数据库
+                if ($who === 'refer' && !$this->refer_connection) {
+                    // 假设预加载的结构不包含高级对象，或者需要另一种方式来处理
+                    // 目前，我们将跳过，以避免错误
+                    continue;
+                }
                 $conn = $who . '_connection';
                 $db = $who . '_db';
                 $sql = str_replace('#', $this->$db, $list_sql[0]);
@@ -179,6 +221,43 @@ class MysqlStructSync
     {
         return $this->diff_sql;
     }
+
+    /**
+     * (新增) 获取按表分组并合并 ALTER 语句的差异 SQL
+     * @return array
+     */
+    public function getGroupedDiffSql()
+    {
+        $alterationsByTable = [];
+        $otherStatements = [];
+        $finalSql = [];
+
+        foreach ($this->diff_sql as $type => $sqls) {
+            foreach ($sqls as $sql) {
+                $trimmedSql = rtrim(trim($sql), ';');
+                if (empty($trimmedSql)) continue;
+
+                if (preg_match('/^ALTER TABLE `(.*?)` (.*)/i', $trimmedSql, $matches)) {
+                    $tableName = $matches[1];
+                    $alteration = $matches[2];
+                    $alterationsByTable[$tableName][] = $alteration;
+                } else {
+                    $otherStatements[] = $trimmedSql;
+                }
+            }
+        }
+
+        foreach ($alterationsByTable as $tableName => $alterations) {
+            $finalSql[] = "ALTER TABLE `{$tableName}` " . implode(', ', $alterations) . ';';
+        }
+
+        foreach ($otherStatements as $statement) {
+            $finalSql[] = $statement . ';';
+        }
+
+        return $finalSql;
+    }
+
     /**
      * getExecuteSql
      *
