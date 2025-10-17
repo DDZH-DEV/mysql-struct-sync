@@ -23,6 +23,7 @@ class MysqlStructSync
     private $refer_connection;
     private $refer_db;
     private $remove_auto_increment = false;
+    private $backup_prefix = 'backup_';
     /**
      * @Author  : 9rax.dev@gmail.com
      * @DateTime: 2019/8/30 19:31
@@ -93,6 +94,18 @@ class MysqlStructSync
     function removeAutoIncrement()
     {
         $this->remove_auto_increment = true;
+    }
+
+    /**
+     * (新增) 设置用于忽略的备份表前缀
+     *
+     * @param string $prefix
+     * @return $this
+     */
+    public function setBackupPrefix(string $prefix)
+    {
+        $this->backup_prefix = $prefix;
+        return $this;
     }
 
     /**
@@ -460,6 +473,10 @@ class MysqlStructSync
         $tables = [];
         $pattern = '/' . implode('|', self::$patterns) . '/m';
         foreach ($stmt1->fetch_all(MYSQLI_ASSOC) as $row) {
+            // (新增) 忽略所有以 backup_ 为前缀的表
+            if (strpos($row['Name'], $this->backup_prefix) === 0) {
+                continue;
+            }
             //获取建表语句
             $alert_columns_conn = $resource->query('SHOW CREATE TABLE ' . $row['Name']);
             $sql = $alert_columns_conn->fetch_assoc();
